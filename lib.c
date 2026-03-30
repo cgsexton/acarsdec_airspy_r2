@@ -32,6 +32,8 @@
  #include "soundfile.h"
 #endif
 
+#define MIX_RENORM_INTERVAL 1024U
+
 /**
  * Return the minimum sample rate multiplier suitable to cover the target frequency range.
  * @param minFc lowest frequency in the range
@@ -56,6 +58,19 @@ unsigned int find_centerfreq(unsigned int minFc, unsigned int maxFc, unsigned in
 
 	// the original tried to pin the center frequency to one of the provided ACARS freqs
 	// there is no reason to do this (and in fact it's better to avoid the DC spike), so keep this simple:
+	return (maxFc + minFc) / 2;
+}
+
+unsigned int find_centerfreq_rate(unsigned int minFc, unsigned int maxFc, unsigned int input_rate)
+{
+	if (R.Fc)
+		return R.Fc;
+
+	if ((maxFc - minFc) > input_rate - 4 * INTRATE) {
+		fprintf(stderr, "Frequencies too far apart\n");
+		return 0;
+	}
+
 	return (maxFc + minFc) / 2;
 }
 
@@ -88,6 +103,38 @@ int channels_init_sdr(unsigned int Fc, unsigned int multiplier, float scale)
 		       n+1, Fc, ch->Fr, correctionPhase, (signed)(ch->Fr - Fc));
 		for (ind = 0; ind < multiplier; ind++)
 			ch->oscillator[ind] = cexpf(correctionPhase * ind * -I) / multiplier / scale;
+	}
+
+	return 0;
+}
+
+int channels_init_sdr_rate(unsigned int Fc, unsigned int input_rate, float scale)
+{
+	unsigned int n;
+	float scale_factor;
+
+	if (!input_rate)
+		return 1;
+
+	scale_factor = ((float)INTRATE / (float)input_rate) / scale;
+
+	for (n = 0; n < R.nbch; n++) {
+		channel_t *ch = &R.channels[n];
+		float correctionPhase;
+
+		ch->dm_buffer = malloc(DMBUFSZ * sizeof(*ch->dm_buffer));
+		if (ch->dm_buffer == NULL) {
+			perror(NULL);
+			return 1;
+		}
+
+		correctionPhase = (signed)(ch->Fr - Fc) / (float)input_rate * (float)(2 * M_PI);
+		vprerr("#%d: Fc = %uHz, Fr = %uHz, phase = % f (%+dHz)\n",
+		       n + 1, Fc, ch->Fr, correctionPhase, (signed)(ch->Fr - Fc));
+
+		ch->mix_phase = scale_factor;
+		ch->mix_step = cexpf(correctionPhase * -I);
+		ch->mix_count = 0;
 	}
 
 	return 0;
@@ -187,5 +234,58 @@ void channels_mix_phasors(const float complex *restrict phasors, unsigned int le
 			ind = lim;
 		len -= lim;
 		phasors += lim;
+	}
+}
+
+void channels_mix_phasors_rate(const float complex *restrict phasors, unsigned int len, unsigned int input_rate)
+{
+	static float complex *restrict D = NULL;
+	static unsigned int phase_acc = 0;
+	const unsigned int nbch = R.nbch;
+	unsigned int i, n;
+
+	if (unlikely(!len || !input_rate))
+		return;
+
+	if (unlikely(!D)) {
+		D = calloc(nbch, sizeof(*D));
+		if (!D)
+			err(EX_OSERR, NULL);
+	}
+
+	for (i = 0; i < len; i++) {
+		float complex sample = phasors[i];
+
+		for (n = 0; n < nbch; n++) {
+			channel_t *ch = &R.channels[n];
+			float complex mixed;
+			float phase_mag;
+
+			mixed = sample * ch->mix_phase;
+			if (!isfinite(crealf(mixed)) || !isfinite(cimagf(mixed))) {
+				vprerr("WARNING: MIX: resetting non-finite mixed sample on channel #%u\n", n + 1);
+				ch->mix_phase = cabsf(ch->mix_phase) > 0.0F ? ch->mix_phase / cabsf(ch->mix_phase) * ((float)INTRATE / (float)input_rate) : ((float)INTRATE / (float)input_rate);
+				ch->mix_count = 0;
+				mixed = 0.0F;
+			}
+			D[n] += mixed;
+			ch->mix_phase *= ch->mix_step;
+			if ((++ch->mix_count & (MIX_RENORM_INTERVAL - 1U)) == 0) {
+				phase_mag = cabsf(ch->mix_phase);
+				if (!isfinite(phase_mag) || phase_mag == 0.0F) {
+					vprerr("WARNING: MIX: resetting invalid NCO state on channel #%u\n", n + 1);
+					ch->mix_phase = ((float)INTRATE / (float)input_rate);
+				} else {
+					ch->mix_phase /= phase_mag;
+					ch->mix_phase *= ((float)INTRATE / (float)input_rate);
+				}
+			}
+		}
+
+		phase_acc += INTRATE;
+		if (phase_acc >= input_rate) {
+			phase_acc -= input_rate;
+			channels_push_and_demod_sample(D);
+		}
 	}
 }

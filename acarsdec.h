@@ -105,6 +105,9 @@ typedef struct {
 	float complex *restrict oscillator;	// scaled oversampled INTRATE oscillator
 	float *restrict dm_buffer;		// INTRATE-sampled signal magnitude buffer
 	float complex *restrict inb;		// oversampled bit circular buffer
+	float complex mix_phase;		// arbitrary-rate SDR NCO state
+	float complex mix_step;			// arbitrary-rate SDR NCO increment
+	unsigned int mix_count;			// arbitrary-rate SDR NCO renormalization counter
 	float MskPhi;				// MSK oscillator phase
 	float MskDphi;				// MSK oscillator phase offset
 	float MskDf;				// MSK oscillator phase offset integral

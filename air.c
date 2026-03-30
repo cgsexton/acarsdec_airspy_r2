@@ -87,6 +87,7 @@ int initAirspy(char *optarg)
 	uint64_t airspy_serial = 0;
 	int airspy_device_count = 0;
 	uint64_t *airspy_device_list = NULL;
+	uint32_t required_rate;
 
 	if (!R.gain)
 		R.gain = 18;
@@ -183,27 +184,23 @@ int initAirspy(char *optarg)
 
 	airspy_get_samplerates(device, supported_samplerates, count);
 	int use_samplerate_index = -1;
+	required_rate = (R.maxFc - R.minFc) + 4 * INTRATE;
 	for (i = 0; i < count; i++) {
 		uint32_t new_rate = supported_samplerates[i];
-		uint32_t new_mult = new_rate / INTRATE;
-		if ((new_mult * INTRATE) == new_rate) {
-			// new_rate is usable if it's a divisible by INTRATE
-			if (use_samplerate_index == -1 || new_rate < AIRINRATE) {
-				// use new_rate if we don't have a rate set yet or if it's lower than the other one
-				// for airspy mini this is just gonna end up being 3 MSPS which should be sufficient
-				// airspy R2 has rates 2.5 and 10 MSPS which both aren't divisable so it's not
-				// usable with 12 kHz INTRATE
-				AIRINRATE = new_rate;
-				AIRMULT = new_mult;
-				use_samplerate_index = i;
-			}
+		if (new_rate < required_rate)
+			continue;
+		if (use_samplerate_index == -1 || new_rate < AIRINRATE) {
+			AIRINRATE = new_rate;
+			AIRMULT = new_rate / INTRATE;
+			use_samplerate_index = i;
 		}
 	}
 
 	free(supported_samplerates);
 
 	if (use_samplerate_index == -1) {
-		fprintf(stderr, ERRPFX "did not find suitable sampling rate\n");
+		fprintf(stderr, ERRPFX "did not find suitable sampling rate for %.3f MHz span\n",
+			((R.maxFc - R.minFc) + 4 * INTRATE) / 1000000.0);
 		goto fail;
 	}
 
@@ -216,7 +213,9 @@ int initAirspy(char *optarg)
 	}
 
 	/* enable packed samples */
-	airspy_set_packing(device, 1);
+	result = airspy_set_packing(device, 1);
+	if (result != AIRSPY_SUCCESS)
+		fprintf(stderr, WARNPFX "airspy_set_packing() failed: %s (%d)\n", airspy_error_name(result), result);
 
 	result = airspy_set_rf_bias(device, (uint8_t) R.bias);
 	if (result != AIRSPY_SUCCESS)
@@ -226,7 +225,7 @@ int initAirspy(char *optarg)
 	if (result != AIRSPY_SUCCESS)
 		fprintf(stderr, WARNPFX "airspy_set_linearity_gain() failed: %s (%d)\n", airspy_error_name(result), result);
 
-	Fc = find_centerfreq(R.minFc, R.maxFc, AIRMULT);
+	Fc = find_centerfreq_rate(R.minFc, R.maxFc, AIRINRATE);
 	if (!Fc)
 		goto fail;
 
@@ -237,7 +236,7 @@ int initAirspy(char *optarg)
 	}
 	vprerr("Set freq. to %d hz\n", Fc);
 
-	result = channels_init_sdr(Fc, AIRMULT, 1.0F);
+	result = channels_init_sdr_rate(Fc, AIRINRATE, 1.0F);
 	if (result)
 		goto fail;
 
@@ -250,7 +249,7 @@ fail:
 
 static int rx_callback(airspy_transfer_t *transfer)
 {
-	channels_mix_phasors(transfer->samples, transfer->sample_count, AIRMULT);
+	channels_mix_phasors_rate(transfer->samples, transfer->sample_count, AIRINRATE);
 	return 0;
 }
 
