@@ -187,7 +187,7 @@ DESTPARAMS are:
  -p <ppm>		set ppm frequency correction (default: 0)
 ```
 
-#### Airspy Mini (R2 is currently not supported)
+#### Airspy Mini/R2
 
 ```
  --airspy <device>	decode from airspy dongle number <device> or hex serial <device>

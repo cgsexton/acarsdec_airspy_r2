@@ -25,7 +25,7 @@ unsigned int find_centerfreq(unsigned int minFc, unsigned int maxFc, unsigned in
 unsigned int find_centerfreq_rate(unsigned int minFc, unsigned int maxFc, unsigned int input_rate);
 int channels_init_sdr(unsigned int Fc, unsigned int multiplier, float scale);
 void channels_mix_phasors(const float complex *phasors, unsigned int len, const unsigned int multiplier);
-int channels_init_sdr_rate(unsigned int Fc, unsigned int input_rate, float scale);
+int channels_init_sdr_resample(unsigned int Fc, unsigned int input_rate, float scale);
 void channels_mix_phasors_resample(const float complex *phasors, unsigned int len, unsigned int input_rate);
 
 #endif /* lib_h */

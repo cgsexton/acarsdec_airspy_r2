@@ -247,7 +247,7 @@ void channels_mix_phasors(const float complex *restrict phasors, unsigned int le
  * This function handles sample rates that are not clean integer multiples 
  * of 12 kHz, specifically for the AirSpy R2 which has rates of 2.5MS/s and
  * 10 MS/s. It breaks out the mixer phase and 12 khZ output timing 
- * explicitly. Similar to the channels_mix_phasors_rate function, once enough
+ * explicitly. Similar to the channels_mix_phasors function, once enough
  * data has been processed, the samples are sent to the push and demod function.
  *
  * The mix_phase is periodically renormalized to prevent small floating
