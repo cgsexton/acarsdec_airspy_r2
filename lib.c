@@ -243,6 +243,25 @@ void channels_mix_phasors(const float complex *restrict phasors, unsigned int le
 	}
 }
 
+/**
+ * This function handles sample rates that are not clean integer multiples 
+ * of 12 kHz, specifically for the AirSpy R2 which has rates of 2.5MS/s and
+ * 10 MS/s. It breaks out the mixer phase and 12 khZ output timing 
+ * explicitly. Similar to the channels_mix_phasors_rate function, once enough
+ * data has been processed, the samples are sent to the push and demod function.
+ *
+ * The mix_phase is periodically renormalized to prevent small floating
+ * point errors from building up and destroying the signal.  
+ *
+ * In plain terms, it takes the channel to baseband, one input sample at
+ * a time. While doing that, enough shifted samples are added to produce
+ * a single output sample at the decoder rate, then passed to the demod, which
+ * stores magnitude and eventually feeds the MSK demod.
+ *
+ * @param phasors An array of input I/Q samples from the SDR
+ * @param len The number of complex samples in the array.
+ * @param input_rate The sample rate in samples per second.
+ */
 void channels_mix_phasors_resample(const float complex *restrict phasors, unsigned int len, unsigned int input_rate)
 {
 	static float complex *restrict D = NULL;
@@ -254,12 +273,14 @@ void channels_mix_phasors_resample(const float complex *restrict phasors, unsign
 		return;
 
 	if (unlikely(!D)) {
+		// Allocate one accumlator per channel
 		D = calloc(nbch, sizeof(*D));
 		if (!D)
 			err(EX_OSERR, NULL);
 	}
 
 	for (i = 0; i < len; i++) {
+		// Process one i/q sample at the device sample rate.
 		float complex sample = phasors[i];
 
 		for (n = 0; n < nbch; n++) {
@@ -267,27 +288,41 @@ void channels_mix_phasors_resample(const float complex *restrict phasors, unsign
 			float complex mixed;
 			float phase_mag;
 
+			// Shift this channel from its RF offset down to baseband
+			// and add the result into the current output accumulator.
 			mixed = sample * ch->mix_phase;
+
+// The below can be used to debug if the renormalization isn't working
+// correctly or if the data is bad (the sample is NaN or inf). 
+#if defined(DEBUG)
 			if (!isfinite(crealf(mixed)) || !isfinite(cimagf(mixed))) {
 				vprerr("WARNING: MIX: resetting non-finite mixed sample on channel #%u\n", n + 1);
 				ch->mix_phase = cabsf(ch->mix_phase) > 0.0F ? ch->mix_phase / cabsf(ch->mix_phase) * ((float)INTRATE / (float)input_rate) : ((float)INTRATE / (float)input_rate);
 				ch->mix_count = 0;
 				mixed = 0.0F;
 			}
+#endif
 			D[n] += mixed;
+
+			// Advance the oscillator so the next sample uses the correct
+			// phase for this channels frequency offset.
 			ch->mix_phase *= ch->mix_step;
+
+			// Every MIX_RENORM_INTERVAL, renormalize the phase magnitude, preventing
+			// drift towards zero/infinity. Floating point roundoff can slowly change
+			// the magnitude of mix_phase. This keeps the oscillator stable. Prior to
+			// implementing this check, after several minutes of runtime, the mix_phase
+			// could/would trend towards zero/inf.
 			if ((++ch->mix_count & (MIX_RENORM_INTERVAL - 1U)) == 0) {
 				phase_mag = cabsf(ch->mix_phase);
-				if (!isfinite(phase_mag) || phase_mag == 0.0F) {
-					vprerr("WARNING: MIX: resetting invalid NCO state on channel #%u\n", n + 1);
-					ch->mix_phase = ((float)INTRATE / (float)input_rate);
-				} else {
-					ch->mix_phase /= phase_mag;
-					ch->mix_phase *= ((float)INTRATE / (float)input_rate);
-				}
+				ch->mix_phase /= phase_mag;
+				ch->mix_phase *= ((float)INTRATE / (float)input_rate);
 			}
 		}
 
+		// Convert the arbitrary rate into a steady 12kHz output,
+		// and when enough has accumulated, emit a decoder-rate
+		// sample to the demodulator.
 		phase_acc += INTRATE;
 		if (phase_acc >= input_rate) {
 			phase_acc -= input_rate;
