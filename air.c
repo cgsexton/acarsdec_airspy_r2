@@ -234,7 +234,7 @@ int initAirspy(char *optarg)
 	}
 	vprerr("Set freq. to %d hz\n", Fc);
 
-	result = channels_init_sdr_rate(Fc, AIRINRATE, 1.0F);
+	result = channels_init_sdr_resample(Fc, AIRINRATE, 1.0F);
 	if (result)
 		goto fail;
 

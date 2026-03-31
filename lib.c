@@ -114,7 +114,7 @@ int channels_init_sdr(unsigned int Fc, unsigned int multiplier, float scale)
 	return 0;
 }
 
-int channels_init_sdr_rate(unsigned int Fc, unsigned int input_rate, float scale)
+int channels_init_sdr_resample(unsigned int Fc, unsigned int input_rate, float scale)
 {
 	unsigned int n;
 	float scale_factor;
