@@ -32,6 +32,12 @@
  #include "soundfile.h"
 #endif
 
+/**
+ * Interval defines how often the arbitrary rate remixer renormalizes the
+ * channel state. This prevents the complex multiplies from drifting in
+ * magnitude over time. As a power of two, it allows use of an bit op rather
+ * than a modulo.
+ */
 #define MIX_RENORM_INTERVAL 1024U
 
 /**
@@ -237,7 +243,7 @@ void channels_mix_phasors(const float complex *restrict phasors, unsigned int le
 	}
 }
 
-void channels_mix_phasors_rate(const float complex *restrict phasors, unsigned int len, unsigned int input_rate)
+void channels_mix_phasors_resample(const float complex *restrict phasors, unsigned int len, unsigned int input_rate)
 {
 	static float complex *restrict D = NULL;
 	static unsigned int phase_acc = 0;

@@ -32,7 +32,6 @@
 #define ERRPFX	"ERROR: AIRSPY: "
 #define WARNPFX	"WARNING: AIRSPY: "
 
-static unsigned int AIRMULT;
 static unsigned int AIRINRATE;
 
 static struct airspy_device *device = NULL;
@@ -191,7 +190,6 @@ int initAirspy(char *optarg)
 			continue;
 		if (use_samplerate_index == -1 || new_rate < AIRINRATE) {
 			AIRINRATE = new_rate;
-			AIRMULT = new_rate / INTRATE;
 			use_samplerate_index = i;
 		}
 	}
@@ -200,7 +198,7 @@ int initAirspy(char *optarg)
 
 	if (use_samplerate_index == -1) {
 		fprintf(stderr, ERRPFX "did not find suitable sampling rate for %.3f MHz span\n",
-			((R.maxFc - R.minFc) + 4 * INTRATE) / 1000000.0);
+		       (required_rate / 1000000.0));
 		goto fail;
 	}
 
@@ -249,7 +247,7 @@ fail:
 
 static int rx_callback(airspy_transfer_t *transfer)
 {
-	channels_mix_phasors_rate(transfer->samples, transfer->sample_count, AIRINRATE);
+	channels_mix_phasors_resample(transfer->samples, transfer->sample_count, AIRINRATE);
 	return 0;
 }
 
